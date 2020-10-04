@@ -14,45 +14,56 @@ const unsigned char dealloc = 		0x8;	//0000 1000
 
 void checkMem(char*);
 void *writeThread(void *argp);
+void writeRand(void);
 struct Vargp {
 	int from,to;
 };
 
 int main(int args, char * argv[]){
+	//check flags ./main -alloc=x, x={0,1,2,4,8}
 	initFlag(args, argv);
-	int flags = 0;
+	int flags = 0; //standart flag
 	flag_int(&flags,"alloc");
 
 	//check do we need dump before allocate
 	if (flags & preallocate)
 		checkMem("./prealloc");
 
+	writeRand();
 
+	return 0;
+}
+
+//write random data to memory
+void writeRand(){
+	struct Vargp vars[35];
 	unsigned int written = START;
-	unsigned int to = written + 7080;
+	unsigned int to = written + BIT;
 	pthread_t tid;
 	for (int i = 0; i < 35; i++){
 		if ((END-to) < BIT)
 			to += END - to;
-		struct Vargp var = {written, to};
-		pthread_create(&tid, NULL, writeThread, &var);
+		vars[i].from = written;
+		vars[i].to = to;
+		pthread_create(&tid, NULL, writeThread, &vars[i]);
 		written += BIT;
 		to += BIT;
 	}
 	pthread_exit(NULL);
-	return 0;
+
 }
+
 
 void checkMem(char* filename){
 	unsigned int i = START;
-	short* symbol = i;
+	unsigned int* symbol = i; //gets value by addser
 	FILE* fp;
 	if ((fp = fopen(filename,"wb")) == NULL){
 		perror("File opening error\n");
 		exit(1);
 	}
 	while(i <= END){
-		putc(symbol, fp);
+		putc(symbol, fp); //put value in the file
 		i++;
 		symbol = i;
 	}
@@ -61,4 +72,5 @@ void checkMem(char* filename){
 void *writeThread(void *vargp){
 	struct Vargp* variables = (struct Vargp*) vargp;
 	printf("from -> %x; to ->%x\n",variables->from, variables->to);
+	return NULL;
 }
