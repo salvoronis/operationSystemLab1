@@ -29,7 +29,7 @@ int main(int args, char * argv[]){
 		getchar();
 	}
 	
-	unsigned char* memory_pointer = (unsigned char*) START;
+	void* memory_pointer =  (void *) START;
 	
 	/**There we allocate memory close to chosen memory
 	 * 242 Mb = 242*1024*1024
@@ -37,7 +37,7 @@ int main(int args, char * argv[]){
 	 * shared with other process and don't use file (anonimus)
 	 * because of anonimus file descriptor is -1
 	 * offset is 0 by the rules*/
-	memory_pointer = (unsigned char*)mmap(memory_pointer,242*1024*1024,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);
+	memory_pointer = mmap(memory_pointer,242*1024*1024,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);
 	//assert will output error if there is something wrong
 	assert(memory_pointer != MAP_FAILED);
 
@@ -48,18 +48,33 @@ int main(int args, char * argv[]){
 
 	write_to_memory(memory_pointer);
 
+	FILE *first = fopen("./res/first", "wb");
+	if (first == NULL){
+		perror("first file error");
+		exit(FILE_ERR);
+	}
+	read_from_memory(first, memory_pointer);
+	fclose(first);
+
+	FILE *second = fopen("./res/second", "wb");
+	if (second == NULL) {
+		perror("second file error");
+		exit(FILE_ERR);
+	}
+	read_from_memory(second, (memory_pointer+162*1024*1024-0x5200059));
+
 	if (flags & afterfill) {
 		puts("it's time tocheck mamorry(after writting)\npress enter to continue");
 		getchar();
 	}
 
-	return 0;
+	return OK;
 }
 /**Thit function accepts memory pointer
  * start threads and make structures for thread's function
  * 35 threads for 242mb which is
  * 7 250 154 bytes for 1 thread and remainder 2 bytes*/
-void write_to_memory(unsigned char * memory_pointer){
+void write_to_memory(void * memory_pointer){
 	uint64_t total = 242*1024*1024;
 	uint64_t blockSize = 7250154;
 	pthread_t thread_id;
@@ -75,7 +90,7 @@ void write_to_memory(unsigned char * memory_pointer){
 
 		pthread_create(&thread_id, NULL, write_thread, piece);
 	}
-	pthread_exit(NULL);
+	pthread_join(thread_id,NULL);
 }
 
 /**This function will write directly into the memory
@@ -85,7 +100,13 @@ void write_to_memory(unsigned char * memory_pointer){
 void *write_thread(void *arg){
 	struct chunk *piece = (struct chunk*) arg;
 	FILE *urand = fopen("/dev/urandom", "r");
-	//printf("start ->%"PRId64" size ->%"PRId64"\n",piece->start,piece->size);
 	fread((piece->mem_pointer + piece->start), 1, piece->size, urand);
 	return 0;
+}
+
+/**This function reads 162 Mb from memory to file*/
+void read_from_memory(FILE *file, void * memory_pointer){
+	for (uint32_t counter = 0; counter < 162*1024*1024; counter += 129) {
+		fwrite(memory_pointer+counter, sizeof(uint8_t), 129, file);
+	}
 }
