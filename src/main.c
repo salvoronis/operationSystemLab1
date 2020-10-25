@@ -7,7 +7,11 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <sys/syscall.h>
 #include <unistd.h>
+#include <signal.h>
+#include <linux/futex.h>
+#include <syscall.h>
 #include "../lib/flags.h"
 #include "./main.h"
 
@@ -15,13 +19,17 @@ const unsigned char preallocate = 	0x1;	//0000 0001
 const unsigned char afteralloc = 	0x2;	//0000 0010
 const unsigned char afterfill = 	0x4;	//0000 0100
 const unsigned char dealloc = 		0x8;	//0000 1000
+int flags = 0; //standart flag
+int futex = 0;
 
 int main(int args, char * argv[]){
 	//check flags
 	//example: ./main -alloc=x, x={0,1,2,4,8}
 	initFlag(args, argv);
-	int flags = 0; //standart flag
 	flag_int(&flags,"alloc");
+	
+	//I well use it to break cycle (^C)
+	signal(SIGINT, interrupt_signal);
 
 	//check do we need dump before allocate
 	if (flags & preallocate){
@@ -45,26 +53,32 @@ int main(int args, char * argv[]){
 		puts("it's time to check memorry(afret allocation)\npress enter to continue");
 		getchar();
 	}
+	//cycle start
+	while(1){
+		puts("weeeweee cycle");
+		write_to_memory(memory_pointer);
 
-	write_to_memory(memory_pointer);
+		FILE *first = fopen("./res/first", "wb");
+		if (first == NULL){
+			perror("first file error");
+			exit(FILE_ERR);
+		}
+		read_from_memory(first, memory_pointer);
+		fclose(first);
 
-	FILE *first = fopen("./res/first", "wb");
-	if (first == NULL){
-		perror("first file error");
-		exit(FILE_ERR);
+		FILE *second = fopen("./res/second", "wb");
+		if (second == NULL) {
+			perror("second file error");
+			exit(FILE_ERR);
+		}
+		read_from_memory(second, (memory_pointer+162*1024*1024-0x5200059));
+		fclose(second);
+		agr_state_thread();
 	}
-	read_from_memory(first, memory_pointer);
-	fclose(first);
-
-	FILE *second = fopen("./res/second", "wb");
-	if (second == NULL) {
-		perror("second file error");
-		exit(FILE_ERR);
-	}
-	read_from_memory(second, (memory_pointer+162*1024*1024-0x5200059));
+	//cycle end
 
 	if (flags & afterfill) {
-		puts("it's time tocheck mamorry(after writting)\npress enter to continue");
+		puts("it's time to check mamorry(after writting)\npress enter to continue");
 		getchar();
 	}
 
@@ -109,4 +123,78 @@ void read_from_memory(FILE *file, void * memory_pointer){
 	for (uint32_t counter = 0; counter < 162*1024*1024; counter += 129) {
 		fwrite(memory_pointer+counter, sizeof(uint8_t), 129, file);
 	}
+}
+
+//TODO разбить 46 потоков на 2 файла
+//итого 23 потока на 1 файл
+//синхронизировать обращение к файлу (хз как)
+void agr_state_thread(void){
+	uint64_t sum = 0;
+	void * results = malloc(46*sizeof(uint64_t));
+	uint64_t *resultss;
+	pthread_t tid[46];
+	uint64_t size = 162*1024*1024/23;
+	uint64_t remainder = 162*1024*1024%23;
+	//printf("%"PRId64",%"PRId64"\n",size,remainder);
+	uint64_t offset = 0;
+	FILE *f1 = fopen("./res/first", "rb");
+	FILE *f2 = fopen("./res/second", "rb");
+	assert((f1!=NULL)&&(f2!=NULL));
+	for (uint8_t i = 0; i<45; i+=2) {
+		if (i == 44)
+			size = remainder;
+		struct agr_state *state = malloc(sizeof(struct agr_state));
+		state->fd = f1;
+		state->size = size;
+		state->off = offset;
+		pthread_create(&(tid[i]),NULL,agrigate_state, state);
+		//agrigate_state(state);
+		state->fd = f2;
+		pthread_create(&(tid[i+1]),NULL,agrigate_state, state);
+		//agrigate_state(state);
+		offset += size;
+		//pthread_join(tid[i], NULL);
+		//pthread_join(tid[i+1], NULL);
+	}
+	futex_wake(&futex,1);
+	for (uint8_t i = 0; i<46; i++) {
+		pthread_join(tid[i], results+(i*sizeof(uint64_t))/*NULL*/);
+	}
+	resultss = results;
+	for (uint8_t i = 0; i<46; i++) {
+		//printf("main here -> %X\n",resultss[i]/*(uint64_t**)(results+(i*sizeof(uint64_t)))*/);
+		sum += resultss[i];
+	}
+	printf("files data sum -> %"PRId64"\n",sum);
+}
+
+void *agrigate_state(void* arg){
+	struct agr_state * state = (struct agr_state*) arg;
+	uint64_t sum = 0;
+	uint8_t point = 0;
+	futex_wait(&futex, 0);
+	fseek(state->fd, state->off, SEEK_SET);
+	for (uint64_t counter = 0; counter != state->size; counter++) {
+		point = fgetc(state->fd);
+		sum += point;
+	}
+	//printf("%X\n",sum);
+	futex_wake(&futex, 1);
+	return (void*)sum/*NULL*/;
+}
+
+void interrupt_signal(int32_t sig){
+	if (flags & dealloc) {
+		puts("it's time to check memory after dealloc\npress enter to continue");
+		getchar();
+	}
+	exit(0);
+}
+
+int futex_wait(int *uaddr, int val){
+	return syscall(SYS_futex, uaddr, FUTEX_WAIT, val, NULL, NULL, 0);
+}
+
+int futex_wake(int *uaddr, int val){
+	return syscall(SYS_futex, uaddr, FUTEX_WAKE, val, NULL, NULL, 0);
 }
