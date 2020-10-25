@@ -53,9 +53,10 @@ int main(int args, char * argv[]){
 		puts("it's time to check memorry(afret allocation)\npress enter to continue");
 		getchar();
 	}
-	//cycle start
+
+	//endless cycle starts here
 	while(1){
-		puts("weeeweee cycle");
+		puts("<--cycle start-->");
 		write_to_memory(memory_pointer);
 
 		FILE *first = fopen("./res/first", "wb");
@@ -74,12 +75,12 @@ int main(int args, char * argv[]){
 		read_from_memory(second, (memory_pointer+162*1024*1024-0x5200059));
 		fclose(second);
 		agr_state_thread();
-	}
-	//cycle end
 
-	if (flags & afterfill) {
-		puts("it's time to check mamorry(after writting)\npress enter to continue");
-		getchar();
+		if (flags & afterfill) {
+			puts("it's time to check memorry(after writting)\npress enter to continue");
+			getchar();
+		}
+		puts("<--cycle end-->");
 	}
 
 	return OK;
@@ -125,9 +126,10 @@ void read_from_memory(FILE *file, void * memory_pointer){
 	}
 }
 
-//TODO разбить 46 потоков на 2 файла
-//итого 23 потока на 1 файл
-//синхронизировать обращение к файлу (хз как)
+/**This function create threads
+ * and threads arguments (struct agr_state)
+ * which contains meta data
+ * then compute sum of threads returns*/
 void agr_state_thread(void){
 	uint64_t sum = 0;
 	void * results = malloc(46*sizeof(uint64_t));
@@ -135,7 +137,6 @@ void agr_state_thread(void){
 	pthread_t tid[46];
 	uint64_t size = 162*1024*1024/23;
 	uint64_t remainder = 162*1024*1024%23;
-	//printf("%"PRId64",%"PRId64"\n",size,remainder);
 	uint64_t offset = 0;
 	FILE *f1 = fopen("./res/first", "rb");
 	FILE *f2 = fopen("./res/second", "rb");
@@ -144,30 +145,30 @@ void agr_state_thread(void){
 		if (i == 44)
 			size = remainder;
 		struct agr_state *state = malloc(sizeof(struct agr_state));
+		struct agr_state *state2 = malloc(sizeof(struct agr_state));
 		state->fd = f1;
+		state2->fd = f2;
 		state->size = size;
+		state2->size = size;
 		state->off = offset;
+		state2->off = offset;
 		pthread_create(&(tid[i]),NULL,agrigate_state, state);
-		//agrigate_state(state);
-		state->fd = f2;
-		pthread_create(&(tid[i+1]),NULL,agrigate_state, state);
-		//agrigate_state(state);
+		pthread_create(&(tid[i+1]),NULL,agrigate_state, state2);
 		offset += size;
-		//pthread_join(tid[i], NULL);
-		//pthread_join(tid[i+1], NULL);
 	}
 	futex_wake(&futex,1);
 	for (uint8_t i = 0; i<46; i++) {
-		pthread_join(tid[i], results+(i*sizeof(uint64_t))/*NULL*/);
+		pthread_join(tid[i], results+(i*sizeof(uint64_t)));
 	}
 	resultss = results;
 	for (uint8_t i = 0; i<46; i++) {
-		//printf("main here -> %X\n",resultss[i]/*(uint64_t**)(results+(i*sizeof(uint64_t)))*/);
 		sum += resultss[i];
 	}
 	printf("files data sum -> %"PRId64"\n",sum);
 }
 
+/**This function read chunk of data from file
+ * and compute sum of the data*/
 void *agrigate_state(void* arg){
 	struct agr_state * state = (struct agr_state*) arg;
 	uint64_t sum = 0;
@@ -178,11 +179,13 @@ void *agrigate_state(void* arg){
 		point = fgetc(state->fd);
 		sum += point;
 	}
-	//printf("%X\n",sum);
 	futex_wake(&futex, 1);
-	return (void*)sum/*NULL*/;
+	return (void*)sum;
 }
 
+/**This function was created to take interrupt signal
+ * and break endless cycle
+ * It allows us to read system data*/
 void interrupt_signal(int32_t sig){
 	if (flags & dealloc) {
 		puts("it's time to check memory after dealloc\npress enter to continue");
@@ -191,6 +194,7 @@ void interrupt_signal(int32_t sig){
 	exit(0);
 }
 
+//system calls for futex
 int futex_wait(int *uaddr, int val){
 	return syscall(SYS_futex, uaddr, FUTEX_WAIT, val, NULL, NULL, 0);
 }
