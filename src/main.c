@@ -21,6 +21,7 @@ const unsigned char afterfill = 	0x4;	//0000 0100
 const unsigned char dealloc = 		0x8;	//0000 1000
 int flags = 0; //standart flag
 int futex = 0;
+void *addr;
 
 int main(int args, char * argv[]){
 	//check flags
@@ -45,7 +46,10 @@ int main(int args, char * argv[]){
 	 * shared with other process and don't use file (anonimus)
 	 * because of anonimus file descriptor is -1
 	 * offset is 0 by the rules*/
-	memory_pointer = mmap(memory_pointer,242*1024*1024,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);
+	int file = open("./file", O_RDWR);
+	ftruncate(file, 242*1024*1024);
+	memory_pointer = mmap(memory_pointer,242*1024*1024,PROT_READ|PROT_WRITE,MAP_PRIVATE,file,0);
+	addr = memory_pointer;
 	//assert will output error if there is something wrong
 	assert(memory_pointer != MAP_FAILED);
 
@@ -105,7 +109,6 @@ void write_to_memory(void * memory_pointer){
 
 		pthread_create(&thread_id, NULL, write_thread, piece);
 	}
-	pthread_join(thread_id,NULL);
 }
 
 /**This function will write directly into the memory
@@ -187,6 +190,7 @@ void *agrigate_state(void* arg){
  * and break endless cycle
  * It allows us to read system data*/
 void interrupt_signal(int32_t sig){
+	munmap(addr, 242*1024*1024);
 	if (flags & dealloc) {
 		puts("it's time to check memory after dealloc\npress enter to continue");
 		getchar();
